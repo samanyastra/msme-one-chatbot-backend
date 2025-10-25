@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{% block title %}App{% endblock %}</title>
+
+    <!-- load external stylesheet served from app/static/css/styles.css -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, msg in messages %}
+              <div class="flash {{ 'error' if category == 'error' else 'success' }}">{{ msg }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        {# use a unique block name to avoid duplicate-definition errors #}
+        {% block body %}{% endblock %}
+
+        <div class="footer">
+          &copy; {{ current_year if current_year is defined else "" }} • Built with Flask
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // small helper to toggle password visibility when an element with data-toggle is clicked
+      document.addEventListener("click", function (e) {
+        var t = e.target;
+        if (t && t.dataset && t.dataset.toggle === "password") {
+          var input = document.getElementById(t.dataset.target);
+          if (input) {
+            input.type = input.type === "password" ? "text" : "password";
+            t.textContent = input.type === "password" ? "Show" : "Hide";
+          }
+        }
+      });
+
+      // basic client-side validation for register form (password match)
+      document.addEventListener(
+        "submit",
+        function (e) {
+          var form = e.target;
+          if (form.dataset && form.dataset.validate === "register") {
+            var p = form.querySelector("#password");
+            var c = form.querySelector("#confirm_password");
+            if (p && c && p.value !== c.value) {
+              e.preventDefault();
+              var msg = form.querySelector(".help.password-mismatch");
+              if (msg) msg.textContent = "Passwords do not match";
+            }
+          }
+        },
+        true
+      );
+    </script>
+  </body>
+</html>
+      input[type="password"],
+      input[type="email"] {
+        width: 100%;
+        padding: 10px 12px;
+        border: 1px solid #e6e8ee;
+        border-radius: 8px;
+        font-size: 0.95rem;
+        box-sizing: border-box;
+        outline: none;
+        transition: box-shadow 0.12s, border-color 0.12s;
+      }
+      input:focus {
+        border-color: rgba(79, 70, 229, 0.85);
+        box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.06);
+      }
+      .row {
+        display: flex;
+        gap: 10px;
+      }
+      .btn {
+        display: inline-block;
+        padding: 10px 14px;
+        background: var(--accent);
+        color: white;
+        border-radius: 8px;
+        border: 0;
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.95rem;
+        width: 100%;
+      }
+      .btn.secondary {
+        background: #eef2ff;
+        color: var(--accent);
+        border: 1px solid rgba(79, 70, 229, 0.08);
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-top: 8px;
+      }
+      .text-right {
+        text-align: right;
+      }
+      .small {
+        font-size: 0.85rem;
+      }
+      .flash {
+        padding: 10px 12px;
+        border-radius: 8px;
+        margin-bottom: 12px;
+        font-size: 0.95rem;
+      }
+      .flash.error {
+        background: #fff1f2;
+        color: var(--danger);
+        border: 1px solid rgba(239, 68, 68, 0.08);
+      }
+      .flash.success {
+        background: #ecfdf5;
+        color: var(--success);
+        border: 1px solid rgba(16, 185, 129, 0.08);
+      }
+      .help {
+        font-size: 0.85rem;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+      .footer {
+        margin-top: 14px;
+        text-align: center;
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      @media (max-width: 480px) {
+        .card {
+          padding: 20px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="card">
+        {% with messages = get_flashed_messages(with_categories=true) %} {% if
+        messages %} {% for category, msg in messages %}
+        <div class="flash {{ 'error' if category == 'error' else 'success' }}">
+          {{ msg }}
+        </div>
+        {% endfor %} {% endif %} {% endwith %} {% block page_content %}{% endblock %}
+
+        <div class="footer">
+          &copy; {{ current_year if current_year is defined else "" }} • Built
+          with Flask
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // small helper to toggle password visibility when an element with data-toggle is clicked
+      document.addEventListener("click", function (e) {
+        var t = e.target;
+        if (t && t.dataset && t.dataset.toggle === "password") {
+          var input = document.getElementById(t.dataset.target);
+          if (input) {
+            input.type = input.type === "password" ? "text" : "password";
+            t.textContent = input.type === "password" ? "Show" : "Hide";
+          }
+        }
+      });
+
+      // basic client-side validation for register form (password match)
+      document.addEventListener(
+        "submit",
+        function (e) {
+          var form = e.target;
+          if (form.dataset && form.dataset.validate === "register") {
+            var p = form.querySelector("#password");
+            var c = form.querySelector("#confirm_password");
+            if (p && c && p.value !== c.value) {
+              e.preventDefault();
+              var msg = form.querySelector(".help.password-mismatch");
+              if (msg) msg.textContent = "Passwords do not match";
+            }
+          }
+        },
+        true
+      );
+    </script>
+  </body>
+</html>

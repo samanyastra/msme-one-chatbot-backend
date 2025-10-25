@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Login{% endblock %}
+{% block page_content %}
+  <h2>Welcome back</h2>
+  <p class="lead">Sign in to continue to your account.</p>
+
+  <form method="post" action="{{ url_for('auth.login') }}" novalidate>
+    {% if csrf_token is defined %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
+
+    <div class="form-group">
+      <label for="username">Username</label>
+      <input id="username" name="username" type="text" required placeholder="your.username" />
+    </div>
+
+    <div class="form-group">
+      <label for="password">Password</label>
+      <div class="row">
+        <input id="password" name="password" type="password" required placeholder="Your password" />
+        <button type="button" data-toggle="password" data-target="password" class="btn secondary" style="max-width:92px">Show</button>
+      </div>
+    </div>
+
+    <div class="form-group row" style="align-items:center;justify-content:space-between">
+      <label class="small"><input type="checkbox" name="remember" /> Remember me</label>
+      <a class="small" href="#">Forgot?</a>
+    </div>
+
+    <div class="form-group">
+      <button class="btn" type="submit">Sign in</button>
+    </div>
+
+    <div class="muted small">New here? <a href="{{ url_for('auth.register') }}">Create an account</a></div>
+  </form>
+{% endblock %}

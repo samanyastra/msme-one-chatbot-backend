@@ -1,0 +1,132 @@
+:root {
+  --bg: #f6f8fb;
+  --card: #ffffff;
+  --accent: #4f46e5;
+  --muted: #6b7280;
+  --danger: #ef4444;
+  --success: #10b981;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial;
+}
+html,
+body {
+  height: 100%;
+  margin: 0;
+  background: linear-gradient(180deg, #f8fafc 0%, var(--bg) 100%);
+  color: #111827;
+}
+.wrap {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+}
+.card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+  padding: 28px;
+}
+h1,
+h2 {
+  margin: 0 0 12px 0;
+  font-weight: 600;
+  color: #0f172a;
+}
+p.lead {
+  margin: 0 0 18px 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.form-group {
+  margin-bottom: 12px;
+}
+label {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+input[type="text"],
+input[type="password"],
+input[type="email"] {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e6e8ee;
+  border-radius: 8px;
+  font-size: 0.95rem;
+  box-sizing: border-box;
+  outline: none;
+  transition: box-shadow 0.12s, border-color 0.12s;
+}
+input:focus {
+  border-color: rgba(79, 70, 229, 0.85);
+  box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.06);
+}
+.row {
+  display: flex;
+  gap: 10px;
+}
+.btn {
+  display: inline-block;
+  padding: 10px 14px;
+  background: var(--accent);
+  color: white;
+  border-radius: 8px;
+  border: 0;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.95rem;
+  width: 100%;
+}
+.btn.secondary {
+  background: #eef2ff;
+  color: var(--accent);
+  border: 1px solid rgba(79, 70, 229, 0.08);
+}
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin-top: 8px;
+}
+.text-right {
+  text-align: right;
+}
+.small {
+  font-size: 0.85rem;
+}
+.flash {
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-size: 0.95rem;
+}
+.flash.error {
+  background: #fff1f2;
+  color: var(--danger);
+  border: 1px solid rgba(239, 68, 68, 0.08);
+}
+.flash.success {
+  background: #ecfdf5;
+  color: var(--success);
+  border: 1px solid rgba(16, 185, 129, 0.08);
+}
+.help {
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.footer {
+  margin-top: 14px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+@media (max-width: 480px) {
+  .card {
+    padding: 20px;
+  }
+}
