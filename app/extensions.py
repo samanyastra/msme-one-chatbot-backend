@@ -14,6 +14,5 @@ from flask_socketio import SocketIO
 db = SQLAlchemy()
 migrate = Migrate()
 jwt = JWTManager()
-# Set async_mode to 'eventlet' and allow cross-origin connections by default.
 socketio = SocketIO(async_mode="eventlet", cors_allowed_origins="*")  # call socketio.init_app(app, cors_allowed_origins="*") in create_app
 

@@ -1,5 +1,11 @@
 (function(){
-  const socket = io(); // default namespace
+  // explicitly connect to backend - update URL as needed for production
+  const socket = io('http://localhost:5000', {
+    transports: ['websocket', 'polling'],
+    reconnectionAttempts: 5,
+    reconnectionDelay: 1000
+  });
+  
   const messagesEl = document.getElementById('messages');
   const inputEl = document.getElementById('input');
   const sendBtn = document.getElementById('send');
@@ -14,8 +20,20 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  // Debug connection events
+  socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+    appendMessage('Connection error: ' + error, 'bot error');
+  });
+
   socket.on('connect', () => {
-    appendMessage('Connected to server', 'bot');
+    console.log('Connected! Socket ID:', socket.id);
+    appendMessage('Connected to server (ID: ' + socket.id + ')', 'bot');
+  });
+
+  socket.on('disconnect', (reason) => {
+    console.log('Disconnected:', reason);
+    appendMessage('Disconnected: ' + reason, 'bot');
   });
 
   socket.on('system', (payload) => {

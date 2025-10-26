@@ -1,9 +1,12 @@
-from flask import current_app
+from flask import current_app, request
 from ..extensions import socketio
 from ..rag import InMemoryRAG, Document
 from flask_socketio import emit, join_room, leave_room
 from typing import List
-import time  # <--- added
+import time
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Example documents for local testing; replace with your document store loader
 _SAMPLE_DOCS = [
@@ -18,13 +21,12 @@ _default_engine = InMemoryRAG(_SAMPLE_DOCS)
 @socketio.on("connect")
 def _on_connect():
     sid = getattr(current_app, "socketio_sid", None)
-    # optionally log or ack
-    emit("system", {"msg": "connected"}, to=None)
+    logger.info(f"Client connected: {request.sid} from {request.remote_addr}")
+    emit("system", {"msg": f"connected as {request.sid}"})
 
 @socketio.on("disconnect")
 def _on_disconnect():
-    # cleanup if needed
-    pass
+    logger.info(f"Client disconnected: {request.sid}")
 
 @socketio.on("chat_message")
 def _on_chat_message(payload):
