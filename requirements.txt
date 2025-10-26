@@ -14,16 +14,16 @@ eventlet>=0.33  # or gevent if preferred
 
 # embeddings / vector store
 sentence-transformers>=2.2.2
+faiss-cpu==1.12.0
+
+# LangChain + HF embeddings for simpler FAISS integration
+langchain==0.1.0
+transformers==4.36.0
+huggingface-hub>=0.13.0
 
 # AWS / HTTP
 boto3>=1.26
 requests>=2.0
-
-# Optional: useful for RAG implementations (vector DBs / ML)
-faiss-cpu==1.12.0
-
-# File reading
-PyPDF2>=3.0
 python-docx>=0.8.11
 # optional: textract for legacy .doc support (install if needed)
 # textract>=1.6.5

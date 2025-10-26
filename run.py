@@ -1,6 +1,15 @@
 from dotenv import load_dotenv, find_dotenv
 load_dotenv(find_dotenv())
 
+# --- ensure eventlet monkey patching happens before importing app/socketio ---
+try:
+    import eventlet
+    # apply monkey patch so standard library modules are cooperative with eventlet
+    eventlet.monkey_patch()
+except Exception:
+    # eventlet may not be installed in all environments; socketio will fallback to other async modes
+    pass
+
 from app import create_app
 from app.extensions import socketio
 

@@ -80,14 +80,22 @@
     uploadResult.textContent = 'Uploading...';
     try{
       const resp = await fetch('/api/docs', { method: 'POST', body: fd });
-      const data = await resp.json();
-      if(!resp.ok) throw data;
+      const data = await resp.json().catch(()=>({}));
+      if(!resp.ok) throw { status: resp.status, body: data };
       uploadResult.innerHTML = `<div class="alert alert-success">Uploaded id ${data.id}</div>`;
       // trigger reindex automatically (UI call)
       await fetch('/api/docs/reindex', { method: 'POST' });
       await loadDocs();
     }catch(err){
-      uploadResult.innerHTML = `<div class="alert alert-danger">Upload failed</div>`;
+      // prefer server-provided message; fall back to other diagnostics
+      let msg = 'Upload failed';
+      if (err) {
+        if (err.body && err.body.msg) msg = err.body.msg;
+        else if (err.msg) msg = err.msg;
+        else if (err.status) msg = `Upload failed (status ${err.status})`;
+        else if (err.message) msg = err.message;
+      }
+      uploadResult.innerHTML = `<div class="alert alert-danger">${escapeHtml(msg)}</div>`;
     }
   });
 

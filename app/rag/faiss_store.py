@@ -7,6 +7,12 @@ logger = logging.getLogger(__name__)
 
 try:
     import faiss
+    # limit FAISS to a single thread to avoid extra OS-level threads/semaphores
+    try:
+        faiss.omp_set_num_threads(1)
+    except Exception:
+        # some faiss builds may not expose omp_set_num_threads; ignore if not present
+        pass
 except Exception as e:
     raise RuntimeError(
         "faiss is required for the FAISS vector store. Install with: pip install faiss-cpu\n"

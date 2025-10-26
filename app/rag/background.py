@@ -1,6 +1,14 @@
 import logging
 from multiprocessing import Process, set_start_method
+import tempfile
 import os
+import boto3
+import shutil
+from urllib.parse import urlparse
+import multiprocessing as mp
+import warnings
+import re
+
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +49,9 @@ def _worker_delete(doc_id):
 def _worker_process_file(doc_id, file_path):
     """
     Child-process worker: read file contents, update Document.text and run index_document.
-    Runs with its own Flask app context.
+    Accepts either a local path or an S3 URI (s3://bucket/key). Downloads S3 objects to a temp file.
     """
+    tmp_path = None
     try:
         from app import create_app
         app = create_app()
@@ -52,8 +61,25 @@ def _worker_process_file(doc_id, file_path):
             from ..models import Document
             from ..extensions import db
 
+            local_path = file_path
+            # If S3 URI provided, download to temporary file
+            if isinstance(file_path, str) and file_path.lower().startswith("s3://"):
+                parsed = urlparse(file_path)
+                bucket = parsed.netloc
+                key = parsed.path.lstrip("/")
+                s3 = boto3.client("s3")
+                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(key)[1] or "")
+                tmp_path = tmp.name
+                tmp.close()
+                try:
+                    s3.download_file(bucket, key, tmp_path)
+                    local_path = tmp_path
+                except Exception:
+                    app.logger.exception("Failed to download %s from S3", file_path)
+                    raise
+
             # determine extension
-            ext = os.path.splitext(file_path)[1].lstrip(".").lower()
+            ext = os.path.splitext(local_path)[1].lstrip(".").lower()
             reader = get_reader_for_extension(ext)
             if reader is None:
                 app.logger.error("No reader for extension: %s", ext)
@@ -61,9 +87,9 @@ def _worker_process_file(doc_id, file_path):
 
             # read text
             try:
-                text = reader.read_text(file_path) or ""
-            except Exception as e:
-                app.logger.exception("Failed to read uploaded file %s: %s", file_path, e)
+                text = reader.read_text(local_path) or ""
+            except Exception:
+                app.logger.exception("Failed to read uploaded file %s", local_path)
                 raise
 
             # update document record
@@ -79,40 +105,43 @@ def _worker_process_file(doc_id, file_path):
             index_document(doc_id)
     except Exception:
         logger.exception("background file processing worker failed for doc_id=%s", doc_id)
-        # allow exception to propagate to child process exit for visibility
         raise
+    finally:
+        # cleanup temp file if we downloaded to it
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except Exception:
+                logger.debug("Failed to remove temporary file %s", tmp_path)
+
+# suppress the known resource_tracker semaphore-leak warning emitted at shutdown
+# This only suppresses the specific text from resource_tracker and does not hide other warnings.
+
+
+# use a dedicated spawn context rather than calling set_start_method repeatedly.
+_spawn_ctx = mp.get_context("spawn")
 
 def start_index_process(doc_id):
-    # prefer spawn to avoid issues on some platforms
-    try:
-        set_start_method("spawn", force=False)
-    except RuntimeError:
-        # start method already set
-        pass
-    p = Process(target=_worker_index, args=(doc_id,), daemon=True)
+    """
+    Start indexing in a separate OS process (spawn context) to avoid blocking and
+    to avoid resource leaks associated with repeated global start_method calls.
+    """
+    p = _spawn_ctx.Process(target=_worker_index, args=(doc_id,), daemon=True)
     p.start()
     logger.info("Started index process pid=%s for doc_id=%s", p.pid, doc_id)
     return p.pid
 
 def start_delete_process(doc_id):
-    try:
-        set_start_method("spawn", force=False)
-    except RuntimeError:
-        pass
-    p = Process(target=_worker_delete, args=(doc_id,), daemon=True)
+    p = _spawn_ctx.Process(target=_worker_delete, args=(doc_id,), daemon=True)
     p.start()
     logger.info("Started delete process pid=%s for doc_id=%s", p.pid, doc_id)
     return p.pid
 
 def start_file_process(doc_id, file_path):
     """
-    Start a separate process to read 'file_path' and index the document.
+    Start a separate process to read 'file_path' (local path or s3://...) and index the document.
     """
-    try:
-        set_start_method("spawn", force=False)
-    except RuntimeError:
-        pass
-    p = Process(target=_worker_process_file, args=(doc_id, file_path), daemon=True)
+    p = _spawn_ctx.Process(target=_worker_process_file, args=(doc_id, file_path), daemon=True)
     p.start()
     logger.info("Started file-processing process pid=%s for doc_id=%s file=%s", p.pid, doc_id, file_path)
     return p.pid

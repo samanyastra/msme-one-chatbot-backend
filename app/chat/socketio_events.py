@@ -8,6 +8,7 @@ import base64
 import tempfile
 import os
 import uuid
+import textwrap
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +19,35 @@ _SAMPLE_DOCS = [
     Document(id="3", text="You can use Socket.IO to have realtime chat-like communication over WebSockets or fallbacks."),
 ]
 
-# Create a default engine instance. In production you may create per-app engine and attach to app context.
-_default_engine = InMemoryRAG(_SAMPLE_DOCS)
+# lazy default engine holder
+_default_engine = None
+
+def get_default_engine():
+    """
+    Return either a LangchainFaissRAG (preferred) or InMemoryRAG fallback.
+    If LangchainFaissRAG is created, kick off its index build in background.
+    """
+    global _default_engine
+    if _default_engine is None:
+        try:
+            from ..rag.langchain_rag import LangchainFaissRAG
+            engine = LangchainFaissRAG()
+            # start build in background so handler is non-blocking
+            try:
+                # try to pass the real Flask app object so the build runs inside app.app_context()
+                try:
+                    app_obj = current_app._get_current_object()
+                except Exception:
+                    app_obj = None
+                    logger.warning("No Flask current_app available when starting Langchain build; build will abort gracefully if needed.")
+                engine.start_background_build(app=app_obj)
+            except Exception:
+                logger.exception("Failed to start background build for LangchainFaissRAG")
+            _default_engine = engine
+        except Exception:
+            logger.exception("Failed to initialize LangchainFaissRAG; falling back to InMemoryRAG")
+            _default_engine = InMemoryRAG(_SAMPLE_DOCS)
+    return _default_engine
 
 # try to initialize AwsTranscriber if available and configured via env
 _transcriber = None
@@ -60,6 +88,56 @@ except Exception:
 _media_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "media")
 os.makedirs(_media_dir, exist_ok=True)
 
+# Bedrock LLM client (optional)
+_bedrock = None
+try:
+    from ..llm.bedrock_client import BedrockClient  # noqa: E402
+    # initialize with env model id or default; region optional
+    try:
+        _bedrock = BedrockClient(model_id=os.getenv("BEDROCK_MODEL_ID"), region=os.getenv("AWS_DEFAULT_REGION"))
+        logger.info("Bedrock client initialized (model=%s)", _bedrock.model_id)
+    except Exception:
+        logger.exception("Failed to initialize BedrockClient")
+        _bedrock = None
+except Exception:
+    logger.info("Bedrock client module not available; LLM augmentation disabled")
+
+def _augment_with_bedrock(query: str, docs: list, model_max_tokens: int = 1200) -> str:
+    """
+    Build a concise prompt combining query + retrieved docs and call Bedrock to produce a final answer.
+    If bedrock client unavailable or fails, raise/return None and caller should fall back.
+    """
+    # prepare context: include top N docs (limited size)
+    parts = []
+    parts.append("You are an assistant that answers user questions using the provided retrieved excerpts.")
+    parts.append("Instructions: Answer the user's question concisely, cite which excerpt(s) you used by doc_id/chunk_index where appropriate.")
+    parts.append("")
+    parts.append("User question:")
+    parts.append(query)
+    parts.append("")
+    parts.append("Retrieved excerpts:")
+    for i, d in enumerate(docs[:6]):
+        meta = d.get("meta") or {}
+        doc_id = meta.get("doc_id") or meta.get("id") or d.get("id")
+        chunk_index = meta.get("chunk_index")
+        text_snip = (meta.get("chunk_text") or d.get("text") or "")[:1000]
+        parts.append(f"[{i+1}] doc_id={doc_id} chunk_index={chunk_index}\n{text_snip}")
+        parts.append("")
+    parts.append("Answer now, keep it short and reference excerpts when relevant.")
+    prompt = "\n".join(parts)
+
+    if not _bedrock:
+        raise RuntimeError("Bedrock client not configured")
+
+    try:
+        # model_max_tokens may be adjusted by env; use moderate default
+        resp = _bedrock.generate(prompt, max_tokens=model_max_tokens, temperature=0.0)
+        # normalize whitespace
+        return resp.strip()
+    except Exception:
+        logger.exception("Bedrock generation failed")
+        raise
+
 @socketio.on("connect")
 def _on_connect():
     sid = getattr(current_app, "socketio_sid", None)
@@ -97,16 +175,38 @@ def _on_chat_message(payload):
         emit("chat_response", {"error": "empty query"})
         return
 
-    # run RAG pipeline (sync). Replace with async/long running job if needed.
-    result = _default_engine.answer(query, top_k=int(payload.get("top_k", 5)))
-    answer = result.get("answer", "")
-    docs = result.get("docs", [])  # list of Document
+    engine = get_default_engine()
+
+    # If engine supports is_ready() and is not ready yet, use lightweight fallback to avoid blocking
+    try:
+        if hasattr(engine, "is_ready") and not engine.is_ready():
+            logger.info("Langchain index not ready yet; using in-memory fallback for query")
+            fallback = InMemoryRAG(_SAMPLE_DOCS)
+            result = fallback.answer(query, top_k=int(payload.get("top_k", 5)))
+        else:
+            result = engine.answer(query, top_k=int(payload.get("top_k", 5)))
+    except Exception:
+        logger.exception("RAG answering failed")
+        emit("chat_response", {"error": "internal error during retrieval"})
+        return
+
+    # Attempt LLM augmentation (Bedrock). Fall back to retrieval answer on any failure.
+    final_answer = result.get("answer", "")
+    try:
+        if _bedrock and result.get("docs"):
+            # send docs as list of dicts to the prompt builder
+            docs_for_prompt = [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])]
+            augmented = _augment_with_bedrock(query, docs_for_prompt)
+            if augmented:
+                final_answer = augmented
+    except Exception:
+        logger.exception("Augmented LLM step failed; using retrieval-only answer")
 
     out = {
-        "answer": answer,
-        "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in docs],
+        "answer": final_answer,
+        "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])],
+        "llm_used": _bedrock.model_id if _bedrock else None
     }
-
     emit("chat_response", out)
 
 @socketio.on("audio_message")
@@ -193,15 +293,40 @@ def _on_audio_message(payload):
                         transcript_en = transcript
 
             # run RAG engine on English text (transcript_en)
-            result = _default_engine.answer(transcript_en, top_k=3)
-            answer = result.get('answer', '')
+            engine = get_default_engine()
+
+    # If engine supports is_ready() and is not ready yet, use lightweight fallback to avoid blocking
+            try:
+                if hasattr(engine, "is_ready") and not engine.is_ready():
+                    logger.info("Langchain index not ready yet; using in-memory fallback for query")
+                    fallback = InMemoryRAG(_SAMPLE_DOCS)
+                    result = fallback.answer(transcript_en, top_k=int(payload.get("top_k", 5)))
+                else:
+                    result = engine.answer(transcript_en, top_k=int(payload.get("top_k", 5)))
+            except Exception:
+                logger.exception("RAG answering failed")
+                emit("chat_response", {"error": "internal error during retrieval"})
+                return
+
+            # Attempt LLM augmentation (Bedrock). Fall back to retrieval answer on any failure.
+            final_answer = result.get("answer", "")
+            try:
+                if _bedrock and result.get("docs"):
+                    docs_for_prompt = [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])]
+                    augmented = _augment_with_bedrock(transcript_en, docs_for_prompt)
+                    if augmented:
+                        final_answer = augmented
+            except Exception:
+                logger.exception("Augmented LLM step failed for audio; using retrieval-only answer")
+
             out = {
-                "transcript": transcript,          # original transcript (possibly non-en)
-                "transcript_en": transcript_en,    # english-converted transcript used for RAG
+                "transcript": transcript,
+                "transcript_en": transcript_en,
                 "input_lang": input_lang,
-                "answer": answer,
+                "answer": final_answer,
                 "audio_url": public_url,
-                "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])]
+                "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])],
+                "llm_used": _bedrock.model_id if _bedrock else None
             }
             socketio.emit("chat_response", out, to=target_sid)
         except Exception:

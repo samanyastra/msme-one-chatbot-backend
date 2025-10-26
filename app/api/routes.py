@@ -9,6 +9,7 @@ import traceback
 from ..models import User, Document
 from ..extensions import db
 from ..rag.background import start_index_process, start_delete_process, start_file_process
+from ..storage import get_storage_client
 
 @api.route("/users", methods=["GET"])
 def list_users():
@@ -26,54 +27,66 @@ def list_docs():
 def create_doc():
     # Accept JSON or form data
     data = request.get_json(silent=True) or request.form or {}
+    # Title may be provided or inferred from filename; we'll require a title (filename can provide it)
     title = data.get("title") or (request.files.get("file") and request.files["file"].filename)
     text = data.get("text")
     uploaded_file = request.files.get("file")
 
-    # If file uploaded but no inline text, we'll read file in background and set text there.
-    # Validate presence of title/text/file
-    if not title and not uploaded_file:
-        return jsonify({"msg": "title and/or file are required"}), 400
+    # Ensure title exists (either explicitly or via uploaded filename)
+    if not title:
+        return jsonify({"msg": "title is required (provide 'title' or upload a file with a filename)"}), 400
 
     # Only allow certain extensions if a file is uploaded
     allowed = {"pdf", "txt", "docx", "doc"}
-    saved_path = None
-    uploads_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "uploads")
-    os.makedirs(uploads_dir, exist_ok=True)
+    saved_uri = None
 
     if uploaded_file:
         orig_name = uploaded_file.filename or ""
         ext = orig_name.rsplit(".", 1)[-1].lower() if "." in orig_name else ""
         if ext not in allowed:
-            return jsonify({"msg": f"file type .{ext} not allowed"}), 400
-        # save file to uploads dir with unique name
+            return jsonify({"msg": f"Unsupported file type '.{ext}'. Allowed types: {', '.join(sorted(allowed))}"}), 400
+
         unique_name = f"{uuid.uuid4().hex}_{orig_name}"
-        saved_path = os.path.join(uploads_dir, unique_name)
-        uploaded_file.save(saved_path)
+        key = f"dataset/{unique_name}"
 
-    # If inline text present and no file, we will index that text
-    if not text and not saved_path:
-        return jsonify({"msg": "text or file required"}), 400
+        # use abstracted storage client to upload (may return s3://... or file://...)
+        storage = get_storage_client()
+        # pass bucket only if storage implementation uses it; get_storage_client handles defaults
+        bucket = os.getenv("DATASET_S3_BUCKET") or os.getenv("TRANSCRIBE_S3_BUCKET")
+        try:
+            # upload_fileobj returns a URI on success (s3://... or file://...)
+            saved_uri = storage.upload_fileobj(uploaded_file.stream, bucket, key)
+        except Exception as e:
+            current_app.logger.exception("Storage upload failed for %s: %s", orig_name, e)
+            # include a helpful error message for admins
+            return jsonify({"msg": "Failed to upload file to storage. Check storage configuration and logs."}), 500
 
-    d = Document(title=title, text=(text or ""))  # if file will be processed later to fill text
-    if saved_path:
-        d.filename = unique_name
+    # Require at least one of text or file
+    if not text and not saved_uri:
+        return jsonify({"msg": "Provide either 'text' (the document content) or upload a supported file (.pdf, .txt, .docx, .doc)."}), 400
+
+    # persist document (text may be empty if file will be processed)
+    d = Document(title=title, text=(text or ""))
+    if saved_uri:
+        d.filename = saved_uri  # store URI (s3://... or file://...)
     db.session.add(d)
     db.session.commit()
 
     # If a file was uploaded: start background process that reads file and indexes (updates DB)
-    if saved_path:
+    if saved_uri:
         try:
-            start_file_process(d.id, saved_path)
+            start_file_process(d.id, saved_uri)
         except Exception:
-            current_app.logger.exception("Failed to start background file processing")
-            return jsonify({"msg": "uploaded but scheduling failed"}), 500
+            current_app.logger.exception("Failed to start background file processing for doc_id=%s", d.id)
+            return jsonify({"msg": "File saved but scheduling background processing failed. See server logs."}), 500
     else:
         # no file -> index the provided text in background
         try:
             start_index_process(d.id)
         except Exception:
-            current_app.logger.exception("Failed to start background indexing process")
+            current_app.logger.exception("Failed to start background indexing process for doc_id=%s", d.id)
+            # still return created but warn
+            return jsonify({"msg": "Document created but indexing could not be scheduled. See server logs."}), 202
 
     return jsonify(d.to_dict()), 201
 
@@ -162,6 +175,15 @@ def reindex_docs():
 #         # remove temp file after processing
 #         try:
 #             if tmp_path and os.path.exists(tmp_path):
+#                 os.remove(tmp_path)
+#         except Exception:
+#             current_app.logger.exception("failed to remove temp audio file")
+
+#         return jsonify({"transcript": transcript, "answer": answer}), 200
+
+#     except Exception as exc:
+#         current_app.logger.error("audio processing failed: %s", traceback.format_exc())
+#         return jsonify({"msg": "processing error"}), 500
 #                 os.remove(tmp_path)
 #         except Exception:
 #             current_app.logger.exception("failed to remove temp audio file")

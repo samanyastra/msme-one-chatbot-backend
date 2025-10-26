@@ -3,7 +3,8 @@
   // to avoid creating multiple connections (which cause multiple SIDs).
   if (!window.__chat_socket) {
     // create and attach to global so subsequent script executions reuse it
-    window.__chat_socket = io('http://localhost:5000', {
+    // Use relative connection so client connects to the same origin the page was served from.
+    window.__chat_socket = io({
       transports: ['websocket', 'polling'],
       reconnectionAttempts: 5,
       reconnectionDelay: 1000
