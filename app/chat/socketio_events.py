@@ -18,10 +18,12 @@ _SAMPLE_DOCS = [
     Document(id="3", text="You can use Socket.IO to have realtime chat-like communication over WebSockets or fallbacks."),
 ]
 
+# Create a default engine instance. In production you may create per-app engine and attach to app context.
 _default_engine = InMemoryRAG(_SAMPLE_DOCS)
 
-# try to import AwsTranscriber if available and configured
+# try to initialize AwsTranscriber if available and configured via env
 _transcriber = None
+_translator = None
 try:
     from ..transcribe.aws_transcribe import AwsTranscriber  # noqa: E402
     s3_bucket = os.getenv("TRANSCRIBE_S3_BUCKET")
@@ -34,9 +36,25 @@ try:
         )
         logger.info("AwsTranscriber initialized using bucket %s", s3_bucket)
     else:
-        logger.info("No TRANSCRIBE_S3_BUCKET set; AwsTranscriber not initialized")
+        logger.info("TRANSCRIBE_S3_BUCKET not set; AwsTranscriber not initialized")
 except Exception:
-    logger.exception("AwsTranscriber not available; will fallback to simulated transcripts")
+    logger.exception("AwsTranscriber not available; audio will use simulated transcription")
+
+# try to initialize AwsTranslator if boto3 translate available and AWS region/creds present
+try:
+    from ..translate.aws_translate import AwsTranslator  # noqa: E402
+    # initialize translator if AWS region is set (or creds present)
+    if os.getenv("AWS_DEFAULT_REGION") or (os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY")):
+        _translator = AwsTranslator(
+            region_name=os.getenv("AWS_DEFAULT_REGION"),
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        )
+        logger.info("AwsTranslator initialized")
+    else:
+        logger.info("AWS credentials/region not present; AwsTranslator not initialized")
+except Exception:
+    logger.exception("AwsTranslator not available; translation disabled")
 
 # ensure media folder exists (app/static/media)
 _media_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "media")
@@ -135,24 +153,52 @@ def _on_audio_message(payload):
             public_url = f"/static/media/{filename}"
             file_size = os.path.getsize(saved_path)
 
-            # Use real transcriber if available
+            # Attempt real transcription if transcriber is configured
             transcript = None
+            input_lang = None
             if _transcriber:
                 try:
-                    transcript = _transcriber.transcribe_file(saved_path)
+                    trans_result = _transcriber.transcribe_file(saved_path)
+                    if isinstance(trans_result, dict):
+                        transcript = trans_result.get("text", "")
+                        input_lang = trans_result.get("input_lang")
+                    else:
+                        transcript = trans_result or ""
                 except Exception:
-                    logger.exception("AwsTranscriber failed, falling back to simulated")
+                    logger.exception("AwsTranscriber failed, falling back to simulated transcript")
                     transcript = None
 
             # fallback simulated transcript
             if not transcript:
                 transcript = f"(simulated) Transcription of audio ({file_size} bytes)"
+                input_lang = input_lang or None
 
-            # run RAG engine on transcript
-            result = _default_engine.answer(transcript, top_k=3)
-            answer = f"(simulated) Answer based on transcript: {transcript}\n\n{result.get('answer','')}"
+            # If detected language is not english, translate to English for RAG/search
+            transcript_en = transcript
+            if input_lang:
+                try:
+                    # normalize primary code (e.g., "te-IN" -> "te")
+                    primary = input_lang.split("-")[0].lower()
+                except Exception:
+                    primary = input_lang.lower()
+                if primary and not primary.startswith("en"):
+                    if _translator:
+                        try:
+                            transcript_en = _translator.translate_text(transcript, source_lang=input_lang, target_lang="en")
+                        except Exception:
+                            logger.exception("Translator failed; using original transcript for RAG")
+                            transcript_en = transcript
+                    else:
+                        # translator not configured; leave transcript_en as original
+                        transcript_en = transcript
+
+            # run RAG engine on English text (transcript_en)
+            result = _default_engine.answer(transcript_en, top_k=3)
+            answer = result.get('answer', '')
             out = {
-                "transcript": transcript,
+                "transcript": transcript,          # original transcript (possibly non-en)
+                "transcript_en": transcript_en,    # english-converted transcript used for RAG
+                "input_lang": input_lang,
                 "answer": answer,
                 "audio_url": public_url,
                 "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])]

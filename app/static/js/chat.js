@@ -40,51 +40,61 @@
       appendMessage && appendMessage(payload && payload.msg ? payload.msg : 'system', 'bot');
     });
 
+    // updated handler: place returned audio_url as a user-side audio preview
     socket.on('chat_response', (payload) => {
       // response arrived -> clear busy and re-enable UI
       window.__chat_busy = false;
       setBusy && setBusy(false);
 
-      if(payload && payload.error){
-        appendMessage('Error: '+payload.error, 'bot');
+      if (payload && payload.error) {
+        appendMessage('Error: ' + payload.error, 'bot');
         return;
       }
 
       // if server returned a transcript, show it as a user-like note
-      if(payload.transcript){
+      if (payload.transcript) {
         appendMessage('Transcript: ' + payload.transcript, 'user');
       }
 
-      // If there's an audio URL, render audio player
-      if(payload.audio_url){
-        // create wrapper
-        const wrapper = document.createElement('div');
-        wrapper.className = 'msg bot';
-        const audio = document.createElement('audio');
-        audio.controls = true;
-        audio.src = payload.audio_url;
-        audio.style.maxWidth = '320px';
-        // optional: autoplay small sound
-        // audio.autoplay = true;
-        wrapper.appendChild(audio);
-        if(payload.answer){
-          const p = document.createElement('div');
-          p.style.marginTop = '8px';
-          p.textContent = payload.answer;
-          wrapper.appendChild(p);
-        }
-        // append to messages area
+      // If there's an audio URL, prefer to show it on the user side.
+      if (payload.audio_url) {
         const messagesEl = document.getElementById('messages');
-        if(messagesEl){
-          messagesEl.appendChild(wrapper);
-          messagesEl.scrollTop = messagesEl.scrollHeight;
+        let replaced = false;
+        if (messagesEl) {
+          // find the most recent user audio element with a data: URL and replace its src
+          const userAudios = messagesEl.querySelectorAll('div.msg.user audio');
+          for (let i = userAudios.length - 1; i >= 0; i--) {
+            const a = userAudios[i];
+            try {
+              if (a && a.src && a.src.startsWith('data:')) {
+                a.src = payload.audio_url;
+                replaced = true;
+                break;
+              }
+            } catch (e) {
+              // ignore access exceptions
+            }
+          }
+
+          // if nothing to replace, append a new user audio element
+          if (!replaced) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'msg user';
+            const audio = document.createElement('audio');
+            audio.controls = true;
+            audio.src = payload.audio_url;
+            audio.style.maxWidth = '320px';
+            wrapper.appendChild(audio);
+            messagesEl.appendChild(wrapper);
+            messagesEl.scrollTop = messagesEl.scrollHeight;
+          }
         }
-        return;
       }
 
-      // fallback: show textual answer
-      const txt = payload && payload.answer ? payload.answer : JSON.stringify(payload);
-      appendMessage(txt, 'bot');
+      // show server answer as bot (if any)
+      if (payload.answer) {
+        appendMessage(payload.answer, 'bot');
+      }
     });
   }
 

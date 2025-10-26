@@ -33,6 +33,9 @@ ENV/
 env/
 .venv/
 
+# media files
+app/static/media/
+
 # IDE
 .idea/
 .vscode/
