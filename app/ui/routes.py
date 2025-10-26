@@ -61,3 +61,8 @@ def login_post():
 @ui.route("/chat", methods=["GET"])
 def chat():
     return render_template("chat/chat.html")
+
+# New: serve the admin UI page at /ui/admin
+@ui.route("/admin", methods=["GET"])
+def admin():
+    return render_template("admin/admin.html")

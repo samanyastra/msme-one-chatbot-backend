@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Admin{% endblock %}
+
+{% block head %}
+  <!-- load bootstrap fast via CDN for admin UI -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <style>
+    /* admin-scoped overrides to ensure full-width admin card and layout */
+    .admin-full .card {
+      max-width: none !important;
+      width: 100% !important;
+    }
+    .admin-full .card .card-body {
+      padding: 1.25rem !important;
+    }
+    /* ensure container spacing remains comfortable on wide screens */
+    .admin-full { padding: 24px 32px; }
+    /* optional: slightly increase table font-size for admin readability */
+    .admin-full table { font-size: 0.95rem; }
+  </style>
+{% endblock %}
+
+{% block layout %}
+  <div class="container-fluid admin-full" style="min-height:80vh;">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h2 class="mb-0">Admin</h2>
+      <div>
+        <a href="{{ url_for('ui.chat') }}" class="btn btn-sm btn-outline-secondary">Open Chat</a>
+      </div>
+    </div>
+
+    <!-- keep the admin card/content centered within the wide container -->
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <ul class="nav nav-tabs" id="adminTabs" role="tablist">
+          <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="docs-tab" data-bs-toggle="tab" data-bs-target="#docs" type="button">Documents</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="upload-tab" data-bs-toggle="tab" data-bs-target="#upload" type="button">Upload</button>
+          </li>
+          <li class="nav-item" role="presentation">
+            <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button">Users</button>
+          </li>
+        </ul>
+
+        <div class="tab-content py-3">
+          <!-- Documents tab -->
+          <div class="tab-pane fade show active" id="docs" role="tabpanel">
+            <div class="d-flex justify-content-between mb-2">
+              <h5>All Documents</h5>
+              <div>
+                <button id="btn-reindex" class="btn btn-warning btn-sm">Reindex</button>
+                <button id="btn-refresh" class="btn btn-secondary btn-sm">Refresh</button>
+              </div>
+            </div>
+
+            <div class="table-responsive">
+              <table class="table table-sm table-hover" id="docs-table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Title</th>
+                    <th>Created</th>
+                    <th>Preview</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <!-- populated by JS -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Upload tab -->
+          <div class="tab-pane fade" id="upload" role="tabpanel">
+            <h5>Upload document</h5>
+            <form id="upload-form" class="mb-3">
+              <div class="mb-2">
+                <label class="form-label">Title</label>
+                <input name="title" class="form-control" />
+              </div>
+              <div class="mb-2">
+                <label class="form-label">Text</label>
+                <textarea name="text" class="form-control" rows="6" placeholder="Paste text or leave empty and upload a file"></textarea>
+              </div>
+              <div class="mb-2">
+                <label class="form-label">File (optional, .txt)</label>
+                <input type="file" name="file" class="form-control" />
+              </div>
+              <button type="submit" class="btn btn-primary">Upload & Reindex</button>
+            </form>
+            <div id="upload-result"></div>
+          </div>
+
+          <!-- Users tab -->
+          <div class="tab-pane fade" id="users" role="tabpanel">
+            <h5>Users</h5>
+            <div id="users-list">
+              <table class="table table-sm" id="users-table">
+                <thead><tr><th>ID</th><th>Username</th></tr></thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- small spacing at bottom -->
+    <div style="height:28px"></div>
+  </div>
+
+  <!-- keep bootstrap bundle and admin script -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
+{% endblock %}
