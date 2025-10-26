@@ -16,17 +16,23 @@ class User(db.Model):
     def to_dict(self):
         return {"id": self.id, "username": self.username}
 
-# New: simple Document model to back admin UI (title + text + created_at)
+# Document model extended with filename, tags and vector_ids (stores list of chunk ids)
 class Document(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(255), nullable=False)
+    filename = db.Column(db.String(255), nullable=True)      # optional original filename
     text = db.Column(db.Text, nullable=False)
+    tags = db.Column(db.String(255), nullable=True)          # optional category/tags
+    vector_ids = db.Column(db.JSON, nullable=True, default=list)  # list of vector ids for this doc
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def to_dict(self):
         return {
             "id": self.id,
             "title": self.title,
+            "filename": self.filename,
             "text": self.text,
+            "tags": self.tags,
+            "vector_ids": self.vector_ids or [],
             "created_at": self.created_at.isoformat() if self.created_at else None,
         }
