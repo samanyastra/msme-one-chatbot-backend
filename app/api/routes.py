@@ -1,7 +1,11 @@
 # Note: shared extensions (db, jwt, etc.) live in app/extensions.py and are
 # initialized in the app factory. Import them from ..extensions when needed.
 from . import api
-from flask import jsonify, request
+from flask import jsonify, request, current_app
+import tempfile
+import os
+import base64
+import traceback
 from ..models import User, Document
 from ..extensions import db
 
@@ -51,3 +55,61 @@ def reindex_docs():
     # Placeholder: trigger reindexing job (vector DB creation). Implement later.
     # Here we simply return success and accepted so UI can show progress.
     return jsonify({"status": "reindex started"}), 202
+
+# @api.route("/audio", methods=["POST"])
+# def handle_audio():
+#     """
+#     Accepts:
+#       - multipart/form-data with "file" -> audio blob
+#       - or JSON with {"audio": "<dataurl or base64>"}
+#     Returns JSON: {"transcript": "...", "answer": "..."}
+#     """
+#     # Try multipart upload first
+#     try:
+#         file = request.files.get("file")
+#         tmp_path = None
+#         if file:
+#             # save to a temp file
+#             suffix = os.path.splitext(file.filename)[1] or ".webm"
+#             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+#             file.save(tmp.name)
+#             tmp_path = tmp.name
+#             file_size = os.path.getsize(tmp_path)
+#         else:
+#             data = request.get_json(silent=True) or {}
+#             audio_data = data.get("audio")
+#             if not audio_data:
+#                 return jsonify({"msg": "no audio provided"}), 400
+#             # handle data URL or plain base64
+#             if audio_data.startswith("data:"):
+#                 # format: data:audio/webm;base64,...
+#                 try:
+#                     header, b64 = audio_data.split(",", 1)
+#                 except Exception:
+#                     b64 = audio_data
+#             else:
+#                 b64 = audio_data
+#             raw = base64.b64decode(b64.split("base64,")[-1])
+#             tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".webm")
+#             with open(tmp.name, "wb") as fh:
+#                 fh.write(raw)
+#             tmp_path = tmp.name
+#             file_size = os.path.getsize(tmp_path)
+
+#         # Placeholder transcription: implement real ASR here (Whisper, cloud, etc.)
+#         transcript = f"(simulated) Transcription of audio ({file_size} bytes)"
+#         # Placeholder RAG interaction: implement actual retrieval/reader pipeline if desired
+#         answer = f"(simulated) Answer based on transcript: {transcript}"
+
+#         # remove temp file after processing
+#         try:
+#             if tmp_path and os.path.exists(tmp_path):
+#                 os.remove(tmp_path)
+#         except Exception:
+#             current_app.logger.exception("failed to remove temp audio file")
+
+#         return jsonify({"transcript": transcript, "answer": answer}), 200
+
+#     except Exception as exc:
+#         current_app.logger.error("audio processing failed: %s", traceback.format_exc())
+#         return jsonify({"msg": "processing error"}), 500

@@ -1,0 +1,81 @@
+/* chat-specific layout and controls */
+.chat-window {
+  display: flex;
+  flex-direction: column;
+  height: 60vh;
+  gap: 10px;
+}
+.messages {
+  flex: 1;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #e6e8ee;
+  border-radius: 8px;
+  background: #fbfdff;
+}
+.msg {
+  margin: 6px 0;
+  padding: 8px;
+  border-radius: 8px;
+  max-width: 85%;
+}
+.msg.user {
+  background: #eef2ff;
+  color: #111827;
+  margin-left: auto;
+}
+.msg.bot {
+  background: #f3f4f6;
+  color: #111827;
+  margin-right: auto;
+}
+.chat-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  align-items: center;
+}
+.small-btn {
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 0;
+  background: #eef2ff;
+  color: var(--accent);
+  cursor: pointer;
+}
+input.chat-input {
+  flex: 1;
+  padding: 10px;
+  border-radius: 8px;
+  border: 1px solid #e6e8ee;
+}
+.icon-btn {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  border: 0;
+  background: #eef2ff;
+  cursor: pointer;
+}
+.icon-btn.recording {
+  background: #ffdddd;
+  color: #b91c1c;
+}
+.rec-indicator {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #b91c1c;
+  display: inline-block;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+/* ensure icon images fit inside buttons */
+.icon-btn img {
+  width: 20px;
+  height: 20px;
+  display: block;
+}

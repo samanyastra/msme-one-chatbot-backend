@@ -1,9 +1,14 @@
+from dotenv import load_dotenv, find_dotenv
+
+# ensure .env (project root) is loaded into os.environ before config is read
+load_dotenv(find_dotenv())
+
 from flask import Flask
 
 def create_app(config_object=None):
     app = Flask(__name__, instance_relative_config=False)
 
-    # load config
+    # config
     from .config import Config
     app.config.from_object(config_object or Config)
 
@@ -12,7 +17,6 @@ def create_app(config_object=None):
     db.init_app(app)
     migrate.init_app(app, db)
     jwt.init_app(app)
-    # initialize socketio with the Flask app
     socketio.init_app(app, cors_allowed_origins="*")
 
     # register blueprints
@@ -28,12 +32,9 @@ def create_app(config_object=None):
     from .ui import ui as ui_bp
     app.register_blueprint(ui_bp, url_prefix="/ui")
 
-    # import socket event handlers so decorators register with the socketio instance
-    # ensure this import happens after socketio.init_app(app)
     try:
         from .chat import socketio_events  # noqa: F401
     except Exception:
-        # if import fails (e.g., during packaging), fail silently to not break the app creation
         pass
 
     return app

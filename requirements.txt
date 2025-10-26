@@ -12,6 +12,10 @@ python-socketio>=5.0
 python-engineio>=4.0
 eventlet>=0.33  # or gevent if preferred
 
+# AWS / HTTP
+boto3>=1.26
+requests>=2.0
+
 # Optional: useful for RAG implementations (vector DBs / ML)
 # faiss-cpu==1.7.3  # uncomment if using FAISS
 # sentence-transformers>=2.0  # uncomment if using local embedding models

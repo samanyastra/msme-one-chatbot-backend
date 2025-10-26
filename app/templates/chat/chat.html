@@ -1,34 +1,73 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Chat</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
-    <style>
-      /* small overrides for chat layout */
-      .chat-window{display:flex;flex-direction:column;height:60vh;gap:10px}
-      .messages{flex:1;overflow:auto;padding:8px;border:1px solid #e6e8ee;border-radius:8px;background:#fbfdff}
-      .msg{margin:6px 0;padding:8px;border-radius:8px;max-width:85%;}
-      .msg.user{background:#eef2ff;color:#111827;margin-left:auto}
-      .msg.bot{background:#f3f4f6;color:#111827;margin-right:auto}
-      .chat-controls{display:flex;gap:8px;margin-top:8px}
-      .small-btn{padding:8px 10px;border-radius:8px;border:0;background:#eef2ff;color:var(--accent);cursor:pointer}
-      input.chat-input{flex:1;padding:10px;border-radius:8px;border:1px solid #e6e8ee}
-    </style>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/styles.css') }}"
+    />
+    <!-- moved chat-specific CSS to external file -->
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/chat.css') }}"
+    />
   </head>
   <body>
     <div class="wrap">
-      <div class="card" style="max-width:800px">
-        <h2 style="margin-bottom:8px">Chat (Socket)</h2>
+      <div class="card" style="max-width: 900px; width: 100%">
+        <h2 style="margin-bottom: 8px">Chat (Socket)</h2>
         <div class="chat-window">
           <div id="messages" class="messages" aria-live="polite"></div>
 
           <div class="chat-controls">
-            <input id="input" class="chat-input" placeholder="Type a message..." />
-            <button id="send" class="btn">Send</button>
-            <button id="btn-hi" class="small-btn">Send "Hi"</button>
-            <button id="btn-hello" class="small-btn">Send "Hello"</button>
+            <input
+              id="input"
+              class="chat-input"
+              placeholder="Type a message..."
+            />
+            <!-- <button id="send" type="button" class="btn" title="Send">Send</button> -->
+
+            <!-- Send icon uses static image -->
+            <button
+              id="send"
+              type="button"
+              class="icon-btn"
+              title="Send"
+              aria-label="send"
+            >
+              <img
+                src="{{ url_for('static', filename='images/send.svg') }}"
+                alt="send icon"
+              />
+            </button>
+
+            <!-- Mic button for audio send: use image from static/images -->
+            <button
+              id="mic-btn"
+              type="button"
+              class="icon-btn"
+              title="Record audio"
+              aria-pressed="false"
+              aria-label="record"
+            >
+              <img
+                src="{{ url_for('static', filename='images/mic.svg') }}"
+                alt="mic icon"
+              />
+            </button>
+            <div
+              id="rec-status"
+              style="display: inline-block; margin-left: 6px"
+            ></div>
+
+            <button id="btn-hi" type="button" class="small-btn">
+              Send "Hi"
+            </button>
+            <button id="btn-hello" type="button" class="small-btn">
+              Send "Hello"
+            </button>
           </div>
         </div>
       </div>
