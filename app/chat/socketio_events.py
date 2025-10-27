@@ -9,6 +9,7 @@ import tempfile
 import os
 import uuid
 import textwrap
+import io
 
 logger = logging.getLogger(__name__)
 
@@ -102,37 +103,101 @@ try:
 except Exception:
     logger.info("Bedrock client module not available; LLM augmentation disabled")
 
+# New: initialize TTS client if available
+_tts = None
+try:
+    from ..llm.tts import TTSClient  # noqa: E402
+    try:
+        _tts = TTSClient(region=os.getenv("AWS_DEFAULT_REGION"))
+        logger.info("TTS client initialized")
+    except Exception:
+        logger.exception("Failed to initialize TTSClient")
+        _tts = None
+except Exception:
+    logger.info("TTS module not available; TTS disabled")
+
 def _augment_with_bedrock(query: str, docs: list, model_max_tokens: int = 1200) -> str:
     """
-    Build a concise prompt combining query + retrieved docs and call Bedrock to produce a final answer.
-    If bedrock client unavailable or fails, raise/return None and caller should fall back.
+    Build a robust prompt combining query + retrieved docs and call Bedrock to produce a final answer.
+
+    Improvements over prior prompt:
+      - Prefer answering from excerpts when any relevant text exists (match keywords / phrases).
+      - Only use the strict apology fallback when NO excerpt is relevant.
+      - Handle greetings explicitly and only as greetings.
+      - Provide short examples to guide the model's behavior.
+      - Instruct the model to output ONLY the final answer (no analysis / chain-of-thought).
     """
-    # prepare context: include top N docs (limited size)
+    # System instructions: concise, precise, and include behavior examples
+    system = [
+        "You are an assistant that MUST answer using ONLY the provided retrieved excerpts.",
+        "Do not use external knowledge except to rephrase or summarize the provided excerpts.",
+        "Do not hallucinate. If you cannot find supporting information in the excerpts, use the exact fallback sentence:",
+        "  Sorry — I can assist only with MSME-related information based on the provided documents.",
+        "Behaviors (in order):",
+        "  1) If the user's message is a simple greeting (examples: 'hi', 'hello', 'hey', 'good morning'), reply exactly:",
+        "     Hello — how can I help you?",
+        "     and STOP.",
+        "  2) Otherwise, try to find relevant excerpt(s):",
+        "     - Look for exact words or close phrases from the user's query inside the excerpts.",
+        "     - If at least one excerpt contains relevant information, produce a concise answer (1-3 sentences) based ONLY on those excerpts.",
+        "     - When you use an excerpt, cite it inline by doc_id and chunk_index, e.g. [doc_id=5 chunk_index=2].",
+        "  3) If NONE of the excerpts contain relevant information (no overlap of key terms or concepts), reply EXACTLY:",
+        "     Sorry — I can assist only with MSME-related information based on the provided documents.",
+        "     Do NOT add any additional text.",
+        "Output requirements:",
+        "  - Return only the final answer text (no internal reasoning, no diagnostics).",
+        "  - Keep the answer concise and helpful.",
+    ]
+
+    # Add a couple of short examples to reduce ambiguity
+    examples = [
+        "EXAMPLE 1 (greeting):",
+        "  User: 'hi'",
+        "  Assistant: 'Hello — how can I help you?'",
+        "",
+        "EXAMPLE 2 (use excerpt):",
+        "  User: 'How do I register a small business in state X?'",
+        "  Excerpts include a paragraph describing registration steps for state X.",
+        "  Assistant: Summarize the steps and cite the excerpt, e.g. 'To register in State X, follow these steps: ... [doc_id=12 chunk_index=0].'",
+        "",
+        "EXAMPLE 3 (no info):",
+        "  User: 'What is the population of City Y?'",
+        "  If no excerpt mentions City Y or population, Assistant:",
+        "  'Sorry — I can assist only with MSME-related information based on the provided documents.'"
+    ]
+
+    # Build prompt with system, examples, user query, and strict context block
     parts = []
-    parts.append("You are an assistant that answers user questions using the provided retrieved excerpts.")
-    parts.append("Instructions: Answer the user's question concisely, cite which excerpt(s) you used by doc_id/chunk_index where appropriate.")
-    parts.append("")
-    parts.append("User question:")
+    parts.append("SYSTEM INSTRUCTIONS:")
+    parts.extend(system)
+    parts.append("\nGUIDING EXAMPLES:")
+    parts.extend(examples)
+    parts.append("\nUSER QUESTION:")
     parts.append(query)
-    parts.append("")
-    parts.append("Retrieved excerpts:")
-    for i, d in enumerate(docs[:6]):
+    parts.append("\nRETRIEVED EXCERPTS (use ONLY these; numbered):")
+
+    # include top N excerpts as strict context
+    for i, d in enumerate(docs[:8]):
         meta = d.get("meta") or {}
         doc_id = meta.get("doc_id") or meta.get("id") or d.get("id")
-        chunk_index = meta.get("chunk_index")
-        text_snip = (meta.get("chunk_text") or d.get("text") or "")[:1000]
-        parts.append(f"[{i+1}] doc_id={doc_id} chunk_index={chunk_index}\n{text_snip}")
-        parts.append("")
-    parts.append("Answer now, keep it short and reference excerpts when relevant.")
+        chunk_index = meta.get("chunk_index", None)
+        text_snip = (meta.get("chunk_text") or d.get("text") or "")[:1600]
+        parts.append(f"[{i+1}] doc_id={doc_id} chunk_index={chunk_index}\n{textwrap.indent(text_snip, '  ')}\n")
+
+    parts.append("\nINSTRUCTIONS TO MODEL:")
+    parts.append("  - First check if the user query is a simple greeting. If so, return the greeting response and stop.")
+    parts.append("  - Otherwise, look for direct matches of important words/phrases from the user query in the excerpts above.")
+    parts.append("  - If you find any supporting excerpt(s), answer concisely and cite them by doc_id and chunk_index.")
+    parts.append("  - If you find NO supporting excerpt, return the exact fallback sentence (no extra text).")
+    parts.append("  - Output ONLY the final answer (no analysis).")
+
     prompt = "\n".join(parts)
 
     if not _bedrock:
         raise RuntimeError("Bedrock client not configured")
 
     try:
-        # model_max_tokens may be adjusted by env; use moderate default
         resp = _bedrock.generate(prompt, max_tokens=model_max_tokens, temperature=0.0)
-        # normalize whitespace
         return resp.strip()
     except Exception:
         logger.exception("Bedrock generation failed")
@@ -202,10 +267,53 @@ def _on_chat_message(payload):
     except Exception:
         logger.exception("Augmented LLM step failed; using retrieval-only answer")
 
+    # New: produce TTS audio and upload to storage; include audio_url in response if successful
+    audio_url = None
+    try:
+        if _tts and final_answer:
+            # prefer language hint from payload if present
+            req_lang = (payload or {}).get("lang") or "en"
+            # simple voice map -- customize per available voices in your region
+            voice_map = {"en": "Joanna", "te": "Aditi"}
+            voice = voice_map.get(req_lang, "Joanna")
+            audio_bytes = _tts.synthesize(final_answer, voice=voice)
+            if audio_bytes:
+                storage = get_storage_client()
+                # prefer S3 presigned URL if S3Storage available
+                try:
+                    from ..storage.s3 import S3Storage  # noqa: E402
+                    is_s3 = isinstance(storage, S3Storage)
+                except Exception:
+                    is_s3 = False
+
+                if is_s3:
+                    # upload to dataset/tts/<uuid>.mp3 in S3 and generate presigned URL
+                    key = f"dataset/tts/{uuid.uuid4().hex}.mp3"
+                    bucket = os.getenv("DATASET_S3_BUCKET") or os.getenv("TRANSCRIBE_S3_BUCKET")
+                    # upload via file-like object
+                    storage.s3.upload_fileobj(io.BytesIO(audio_bytes), bucket, key)
+                    try:
+                        audio_url = storage.s3.generate_presigned_url(
+                            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
+                        )
+                    except Exception:
+                        # fallback to s3:// URI if presign fails
+                        audio_url = f"s3://{bucket}/{key}"
+                else:
+                    # local: write into app/static/media so web client can fetch via /static/media/...
+                    fname = f"{uuid.uuid4().hex}.mp3"
+                    dest = os.path.join(_media_dir, fname)
+                    with open(dest, "wb") as fh:
+                        fh.write(audio_bytes)
+                    audio_url = f"/static/media/{fname}"
+    except Exception:
+        logger.exception("TTS generation/upload failed; continuing without audio")
+
     out = {
         "answer": final_answer,
         "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])],
-        "llm_used": _bedrock.model_id if _bedrock else None
+        "llm_used": _bedrock.model_id if _bedrock else None,
+        "audio_url": audio_url
     }
     emit("chat_response", out)
 
@@ -319,12 +427,47 @@ def _on_audio_message(payload):
             except Exception:
                 logger.exception("Augmented LLM step failed for audio; using retrieval-only answer")
 
+            # New: synthesize TTS for audio responses (respect requested_lang if present in p)
+            audio_url = None
+            try:
+                if _tts and final_answer:
+                    req_lang = (p or {}).get("lang") or "en"
+                    voice_map = {"en": "Joanna", "te": "Aditi"}
+                    voice = voice_map.get(req_lang, "Joanna")
+                    audio_bytes = _tts.synthesize(final_answer, voice=voice)
+                    if audio_bytes:
+                        storage = get_storage_client()
+                        try:
+                            from ..storage.s3 import S3Storage  # noqa: E402
+                            is_s3 = isinstance(storage, S3Storage)
+                        except Exception:
+                            is_s3 = False
+
+                        if is_s3:
+                            key = f"dataset/tts/{uuid.uuid4().hex}.mp3"
+                            bucket = os.getenv("DATASET_S3_BUCKET") or os.getenv("TRANSCRIBE_S3_BUCKET")
+                            storage.s3.upload_fileobj(io.BytesIO(audio_bytes), bucket, key)
+                            try:
+                                audio_url = storage.s3.generate_presigned_url(
+                                    "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
+                                )
+                            except Exception:
+                                audio_url = f"s3://{bucket}/{key}"
+                        else:
+                            fname = f"{uuid.uuid4().hex}.mp3"
+                            dest = os.path.join(_media_dir, fname)
+                            with open(dest, "wb") as fh:
+                                fh.write(audio_bytes)
+                            audio_url = f"/static/media/{fname}"
+            except Exception:
+                logger.exception("TTS generation/upload failed for audio; continuing without audio_url")
+
             out = {
                 "transcript": transcript,
                 "transcript_en": transcript_en,
                 "input_lang": input_lang,
                 "answer": final_answer,
-                "audio_url": public_url,
+                "audio_url": audio_url,
                 "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])],
                 "llm_used": _bedrock.model_id if _bedrock else None
             }

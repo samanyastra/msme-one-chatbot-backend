@@ -97,6 +97,50 @@
         appendMessage(payload.answer, 'bot');
       }
     });
+
+    // handle structured welcome message from server
+    socket.on('welcome', (payload) => {
+      try {
+        const welcomeEl = document.getElementById('welcome-area');
+        if (!welcomeEl) return;
+        // clear previous
+        welcomeEl.innerHTML = '';
+        // greeting text
+        const h = document.createElement('div');
+        h.style.marginBottom = '6px';
+        h.textContent = payload && payload.msg ? payload.msg : 'Hi — how can I help you?';
+        welcomeEl.appendChild(h);
+        // language buttons
+        if (payload && payload.languages && payload.languages.length) {
+          const btnWrap = document.createElement('div');
+          payload.languages.forEach((lang) => {
+            const b = document.createElement('button');
+            b.className = 'small-btn';
+            b.style.marginRight = '6px';
+            b.textContent = lang.label;
+            b.dataset.lang = lang.code;
+            if ((payload.default || 'en') === lang.code) {
+              b.style.opacity = '1';
+              b.style.fontWeight = '700';
+              window.__chat_selected_lang = lang.code;
+            } else {
+              b.style.opacity = '0.85';
+            }
+            b.addEventListener('click', () => {
+              // mark selected visually
+              Array.from(btnWrap.children).forEach(x => { x.style.fontWeight = '400'; x.style.opacity='0.85'; });
+              b.style.fontWeight = '700';
+              b.style.opacity = '1';
+              window.__chat_selected_lang = b.dataset.lang;
+            });
+            btnWrap.appendChild(b);
+          });
+          welcomeEl.appendChild(btnWrap);
+        }
+      } catch (err) {
+        console.error('Failed to render welcome', err);
+      }
+    });
   }
 
   const messagesEl = document.getElementById('messages');
@@ -150,7 +194,31 @@
     el.dataset.listenerAttached = 'true';
   }
 
-  // text send
+  // global selected language for messages (text & audio)
+  window.__chat_message_language = window.__chat_message_language || 'en';
+
+  // helper to update lang toggle UI
+  function updateLangToggleUI() {
+    const btn = document.getElementById('lang-toggle');
+    if (!btn) return;
+    const code = window.__chat_message_language || 'en';
+    btn.textContent = (code === 'te') ? 'TE' : 'EN';
+    btn.setAttribute('aria-pressed', code === 'te' ? 'true' : 'false');
+    btn.title = (code === 'te') ? 'Language: Telugu' : 'Language: English';
+  }
+
+  // attach once: toggle language when clicked
+  attachOnce(document.getElementById('lang-toggle'), 'click', () => {
+    window.__chat_message_language = (window.__chat_message_language === 'te') ? 'en' : 'te';
+    // keep backward compat var if other code uses it
+    window.__chat_selected_lang = window.__chat_message_language;
+    updateLangToggleUI();
+  });
+
+  // initialize toggle UI on load
+  updateLangToggleUI();
+
+  // --- existing send handler: include language in payload ---
   attachOnce(sendBtn, 'click', () => {
     if(window.__chat_busy) return;            // ignore while busy
     const v = (inputEl && inputEl.value || '').trim();
@@ -159,7 +227,7 @@
     // mark busy before sending
     window.__chat_busy = true;
     setBusy(true);
-    socket.emit('chat_message', { query: v });
+    socket.emit('chat_message', { query: v, lang: window.__chat_message_language });
     if(inputEl) inputEl.value = '';
   });
 
@@ -179,7 +247,7 @@
     appendMessage(msg, 'user');
     window.__chat_busy = true;
     setBusy(true);
-    socket.emit('chat_message', { query: msg });
+    socket.emit('chat_message', { query: msg, lang: window.__chat_message_language });
   });
 
   attachOnce(helloBtn, 'click', () => {
@@ -188,7 +256,7 @@
     appendMessage(msg, 'user');
     window.__chat_busy = true;
     setBusy(true);
-    socket.emit('chat_message', { query: msg });
+    socket.emit('chat_message', { query: msg, lang: window.__chat_message_language });
   });
 
 //   attachOnce(rocketBtn, 'click', () => {
@@ -229,11 +297,12 @@
           setBusy(true);
 
           try {
-            // emit audio over socket for server-side processing
+            // emit audio over socket for server-side processing with selected language code
             socket.emit('audio_message', {
               audio: base64data,
               audio_type: blob.type,
-              audio_len: blob.size
+              audio_len: blob.size,
+              lang: window.__chat_message_language || 'en'
             });
             // server will emit chat_response when processing completes
           } catch (err) {
