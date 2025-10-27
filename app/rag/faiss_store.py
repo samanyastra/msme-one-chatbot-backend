@@ -2,6 +2,8 @@ import os
 import logging
 import json
 import numpy as np
+import uuid
+from typing import Optional, List, Mapping
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +34,7 @@ class FaissStore:
       query(embedding, top_k=5, include_metadata=True) -> returns dict similar to pinecone response
     """
 
-    def __init__(self, index_name: str = None, api_key: str = None, environment: str = None):
+    def __init__(self, index_name: str = None, api_key: str = None, environment: str = None, embedder: Optional[object] = None):
         # storage paths
         base = os.path.join(os.path.dirname(os.path.dirname(__file__)), "static", "vector_store")
         os.makedirs(base, exist_ok=True)
@@ -47,6 +49,10 @@ class FaissStore:
         self.id_to_int = {}
         self.int_to_id = {}
         self.metadata = {}  # string_id -> metadata dict
+
+        # Lazy embedder: allow injecting an external embedder (e.g., SentenceTransformer instance)
+        # If None, we will attempt to load sentence-transformers on demand.
+        self._embedder = embedder
 
         # load existing store if present
         if os.path.exists(self.meta_path) and os.path.exists(self.index_path):
@@ -169,6 +175,80 @@ class FaissStore:
                 logger.exception("Failed to remove ids from FAISS index")
                 # continue and persist mapping changes anyway
             self._save_meta_and_index()
+
+    def _get_embedder(self):
+        """
+        Return an embedder instance. If an embedder was injected in __init__, use it.
+        Otherwise lazily load SentenceTransformer using SENTENCE_TRANSFORMER_MODEL env var.
+        Raises RuntimeError if sentence-transformers is not available.
+        """
+        if self._embedder is not None:
+            return self._embedder
+
+        try:
+            from sentence_transformers import SentenceTransformer  # local import to avoid heavy startup cost
+        except Exception as e:
+            logger.exception("sentence-transformers not available: %s", e)
+            raise RuntimeError("sentence-transformers is required for embed_texts; install it or provide an embedder") from e
+
+        model_name = os.getenv("SENTENCE_TRANSFORMER_MODEL", "all-MiniLM-L6-v2")
+        try:
+            logger.info("Loading sentence-transformers model: %s", model_name)
+            self._embedder = SentenceTransformer(model_name)
+            return self._embedder
+        except Exception as e:
+            logger.exception("Failed to load embedding model %s: %s", model_name, e)
+            raise RuntimeError(f"Failed to load embedding model {model_name}") from e
+
+    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+        """
+        Embed a list of strings and return a list of vector lists.
+        Uses a lazily-loaded sentence-transformers model if no external embedder provided.
+        """
+        if not texts:
+            return []
+        model = self._get_embedder()
+        try:
+            arr = model.encode(texts, show_progress_bar=False, convert_to_numpy=True)
+            # convert numpy array to python list of lists
+            result = [list(v) for v in arr]
+            return result
+        except Exception:
+            logger.exception("Embedding failed")
+            # re-raise so caller knows embedding failed
+            raise
+
+    def upsert_texts(self, texts: List[str], metadatas: Optional[List[Mapping]] = None, id_prefix: Optional[str] = None):
+        """
+        Convenience: embed provided `texts` and upsert them into FAISS with generated ids.
+        - texts: list of strings
+        - metadatas: optional list of metadata dicts (same length as texts)
+        - id_prefix: optional prefix used when generating unique string ids for each chunk
+
+        Returns: list of generated string ids
+        """
+        if not texts:
+            return []
+
+        if metadatas is None:
+            metadatas = [None] * len(texts)
+
+        embeddings = self.embed_texts(texts)
+
+        vectors = []
+        generated_ids = []
+        for i, (txt, emb, meta) in enumerate(zip(texts, embeddings, metadatas)):
+            sid = f"{id_prefix or 'txt'}_{uuid.uuid4().hex}_{i}"
+            generated_ids.append(sid)
+            vectors.append({
+                "id": sid,
+                "values": emb,
+                "metadata": meta or {"text": txt}
+            })
+
+        # delegate to existing upsert_vectors
+        self.upsert_vectors(vectors)
+        return generated_ids
 
     def query(self, embedding, top_k=5, include_metadata=True):
         """

@@ -9,7 +9,6 @@ import tempfile
 import os
 import uuid
 import textwrap
-import io
 
 logger = logging.getLogger(__name__)
 
@@ -103,19 +102,6 @@ try:
 except Exception:
     logger.info("Bedrock client module not available; LLM augmentation disabled")
 
-# New: initialize TTS client if available
-_tts = None
-try:
-    from ..llm.tts import TTSClient  # noqa: E402
-    try:
-        _tts = TTSClient(region=os.getenv("AWS_DEFAULT_REGION"))
-        logger.info("TTS client initialized")
-    except Exception:
-        logger.exception("Failed to initialize TTSClient")
-        _tts = None
-except Exception:
-    logger.info("TTS module not available; TTS disabled")
-
 def _augment_with_bedrock(query: str, docs: list, model_max_tokens: int = 1200) -> str:
     """
     Build a robust prompt combining query + retrieved docs and call Bedrock to produce a final answer.
@@ -140,7 +126,6 @@ def _augment_with_bedrock(query: str, docs: list, model_max_tokens: int = 1200) 
         "  2) Otherwise, try to find relevant excerpt(s):",
         "     - Look for exact words or close phrases from the user's query inside the excerpts.",
         "     - If at least one excerpt contains relevant information, produce a concise answer (1-3 sentences) based ONLY on those excerpts.",
-        "     - When you use an excerpt, cite it inline by doc_id and chunk_index, e.g. [doc_id=5 chunk_index=2].",
         "  3) If NONE of the excerpts contain relevant information (no overlap of key terms or concepts), reply EXACTLY:",
         "     Sorry — I can assist only with MSME-related information based on the provided documents.",
         "     Do NOT add any additional text.",
@@ -158,7 +143,7 @@ def _augment_with_bedrock(query: str, docs: list, model_max_tokens: int = 1200) 
         "EXAMPLE 2 (use excerpt):",
         "  User: 'How do I register a small business in state X?'",
         "  Excerpts include a paragraph describing registration steps for state X.",
-        "  Assistant: Summarize the steps and cite the excerpt, e.g. 'To register in State X, follow these steps: ... [doc_id=12 chunk_index=0].'",
+        "  Assistant: Summarize the steps and cite the excerpt, e.g. 'To register in State X, follow these steps: ...'",
         "",
         "EXAMPLE 3 (no info):",
         "  User: 'What is the population of City Y?'",
@@ -187,7 +172,7 @@ def _augment_with_bedrock(query: str, docs: list, model_max_tokens: int = 1200) 
     parts.append("\nINSTRUCTIONS TO MODEL:")
     parts.append("  - First check if the user query is a simple greeting. If so, return the greeting response and stop.")
     parts.append("  - Otherwise, look for direct matches of important words/phrases from the user query in the excerpts above.")
-    parts.append("  - If you find any supporting excerpt(s), answer concisely and cite them by doc_id and chunk_index.")
+    parts.append("  - If you find any supporting excerpt(s), answer concisely.")
     parts.append("  - If you find NO supporting excerpt, return the exact fallback sentence (no extra text).")
     parts.append("  - Output ONLY the final answer (no analysis).")
 
@@ -267,53 +252,10 @@ def _on_chat_message(payload):
     except Exception:
         logger.exception("Augmented LLM step failed; using retrieval-only answer")
 
-    # New: produce TTS audio and upload to storage; include audio_url in response if successful
-    audio_url = None
-    try:
-        if _tts and final_answer:
-            # prefer language hint from payload if present
-            req_lang = (payload or {}).get("lang") or "en"
-            # simple voice map -- customize per available voices in your region
-            voice_map = {"en": "Joanna", "te": "Aditi"}
-            voice = voice_map.get(req_lang, "Joanna")
-            audio_bytes = _tts.synthesize(final_answer, voice=voice)
-            if audio_bytes:
-                storage = get_storage_client()
-                # prefer S3 presigned URL if S3Storage available
-                try:
-                    from ..storage.s3 import S3Storage  # noqa: E402
-                    is_s3 = isinstance(storage, S3Storage)
-                except Exception:
-                    is_s3 = False
-
-                if is_s3:
-                    # upload to dataset/tts/<uuid>.mp3 in S3 and generate presigned URL
-                    key = f"dataset/tts/{uuid.uuid4().hex}.mp3"
-                    bucket = os.getenv("DATASET_S3_BUCKET") or os.getenv("TRANSCRIBE_S3_BUCKET")
-                    # upload via file-like object
-                    storage.s3.upload_fileobj(io.BytesIO(audio_bytes), bucket, key)
-                    try:
-                        audio_url = storage.s3.generate_presigned_url(
-                            "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
-                        )
-                    except Exception:
-                        # fallback to s3:// URI if presign fails
-                        audio_url = f"s3://{bucket}/{key}"
-                else:
-                    # local: write into app/static/media so web client can fetch via /static/media/...
-                    fname = f"{uuid.uuid4().hex}.mp3"
-                    dest = os.path.join(_media_dir, fname)
-                    with open(dest, "wb") as fh:
-                        fh.write(audio_bytes)
-                    audio_url = f"/static/media/{fname}"
-    except Exception:
-        logger.exception("TTS generation/upload failed; continuing without audio")
-
     out = {
         "answer": final_answer,
         "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])],
-        "llm_used": _bedrock.model_id if _bedrock else None,
-        "audio_url": audio_url
+        "llm_used": _bedrock.model_id if _bedrock else None
     }
     emit("chat_response", out)
 
@@ -427,47 +369,12 @@ def _on_audio_message(payload):
             except Exception:
                 logger.exception("Augmented LLM step failed for audio; using retrieval-only answer")
 
-            # New: synthesize TTS for audio responses (respect requested_lang if present in p)
-            audio_url = None
-            try:
-                if _tts and final_answer:
-                    req_lang = (p or {}).get("lang") or "en"
-                    voice_map = {"en": "Joanna", "te": "Aditi"}
-                    voice = voice_map.get(req_lang, "Joanna")
-                    audio_bytes = _tts.synthesize(final_answer, voice=voice)
-                    if audio_bytes:
-                        storage = get_storage_client()
-                        try:
-                            from ..storage.s3 import S3Storage  # noqa: E402
-                            is_s3 = isinstance(storage, S3Storage)
-                        except Exception:
-                            is_s3 = False
-
-                        if is_s3:
-                            key = f"dataset/tts/{uuid.uuid4().hex}.mp3"
-                            bucket = os.getenv("DATASET_S3_BUCKET") or os.getenv("TRANSCRIBE_S3_BUCKET")
-                            storage.s3.upload_fileobj(io.BytesIO(audio_bytes), bucket, key)
-                            try:
-                                audio_url = storage.s3.generate_presigned_url(
-                                    "get_object", Params={"Bucket": bucket, "Key": key}, ExpiresIn=3600
-                                )
-                            except Exception:
-                                audio_url = f"s3://{bucket}/{key}"
-                        else:
-                            fname = f"{uuid.uuid4().hex}.mp3"
-                            dest = os.path.join(_media_dir, fname)
-                            with open(dest, "wb") as fh:
-                                fh.write(audio_bytes)
-                            audio_url = f"/static/media/{fname}"
-            except Exception:
-                logger.exception("TTS generation/upload failed for audio; continuing without audio_url")
-
             out = {
                 "transcript": transcript,
                 "transcript_en": transcript_en,
                 "input_lang": input_lang,
                 "answer": final_answer,
-                "audio_url": audio_url,
+                "audio_url": public_url,
                 "docs": [{"id": d.id, "text": d.text, "meta": d.meta} for d in result.get("docs", [])],
                 "llm_used": _bedrock.model_id if _bedrock else None
             }
