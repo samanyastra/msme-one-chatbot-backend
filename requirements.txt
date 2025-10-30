@@ -15,9 +15,10 @@ eventlet>=0.33  # or gevent if preferred
 # embeddings / vector store
 sentence-transformers>=2.2.2
 faiss-cpu==1.12.0
+pinecone
 
 # LangChain + HF embeddings for simpler FAISS integration
-langchain==0.1.0
+langchain
 transformers==4.36.0
 huggingface-hub>=0.13.0
 

@@ -1,13 +1,16 @@
+# from torch import embedding
 from ..models import Document
 from ..extensions import db
 from .chunker import chunk_text
 from .embeddings import EmbeddingProvider
-from .faiss_store import FaissStore  # ...changed import...
+# from .faiss_store import FaissStore  # ...changed import...
+from .pinecone_store import PineconeStore
 import os
 import uuid
 import logging
 
 logger = logging.getLogger(__name__)
+
 
 # lazy singletons
 _embedder = None
@@ -22,7 +25,7 @@ def get_embedder():
 def get_vector_store():
     global _vector_store
     if _vector_store is None:
-        _vector_store = FaissStore()
+        _vector_store = PineconeStore()
     return _vector_store
 
 def index_document(doc_id: int):
@@ -32,17 +35,28 @@ def index_document(doc_id: int):
     doc = Document.query.get(doc_id)
     if not doc:
         raise ValueError("document not found")
-    chunks = chunk_text(doc.text or "", chunk_size=512, overlap=64)
+    chunks = chunk_text(doc.text or "", chunk_size=1024, overlap=64)
     if not chunks:
         return {"status": "no-chunks"}
-    embedder = get_embedder()
-    embeddings = embedder.embed(chunks)
+    # embedder = get_embedder()
+    # embeddings = embedder.embed(chunks)
+    embeddings = [i for i in range(len(chunks))]
     vectors = []
     vector_ids = []
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
         vid = f"{doc.id}_{uuid.uuid4().hex}_{i}"
-        vectors.append({"id": vid, "values": emb, "metadata": {"doc_id": doc.id, "chunk_index": i, "chunk_text": chunk}})
+        # vectors.append({"id": vid, "values": emb, "metadata": {"doc_id": doc.id, "chunk_index": i, "chunk_text": chunk}})
+        # vectors.append({"id": vid, "values": chunk, "metadata": {"doc_id": doc.id, "doc_name": doc.filenam, "chunk_index": i, "chunk_text": chunk}})
+        vobj = {
+            "_id": vid,
+            "text": chunk,
+            "doc_id": doc.id, 
+            "doc_name": doc.filename, 
+            "chunk_index": i,
+            # "metadata": {"doc_id": doc.id, "doc_name": doc.filename, "chunk_index": i}
+        }
         vector_ids.append(vid)
+        vectors.append(vobj)
     store = get_vector_store()
     store.upsert_vectors(vectors)
     # update document metadata
@@ -62,5 +76,4 @@ def delete_document_vectors(doc_id: int):
     doc.vector_ids = []
     db.session.add(doc)
     db.session.commit()
-    return {"status": "deleted", "deleted_count": len(ids)}
     return {"status": "deleted", "deleted_count": len(ids)}

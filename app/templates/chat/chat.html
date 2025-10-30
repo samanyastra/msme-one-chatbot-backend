@@ -4,82 +4,67 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Chat</title>
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/styles.css') }}"
-    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}" />
     <!-- moved chat-specific CSS to external file -->
-    <link
-      rel="stylesheet"
-      href="{{ url_for('static', filename='css/chat.css') }}"
-    />
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/chat.css') }}" />
   </head>
   <body>
-    <div class="wrap">
-      <div class="card" style="max-width: 900px; width: 100%">
-        <h2 style="margin-bottom: 8px">MSME One Assistant</h2>
-        <div class="chat-window">
-          <div id="messages" class="messages" aria-live="polite"></div>
+    <div class="chat-wrap">
+      <div class="chat-shell">
+        <!-- conversation list / recent chats -->
+        <div class="conv-list" aria-hidden="false">
+          <div class="header">
+            <div>
+              <strong>Conversations</strong>
+              <div class="small-muted" style="font-size:12px">Recent and pinned</div>
+            </div>
+            <div><button class="icon-btn" title="New conversation">+</button></div>
+          </div>
+          <div class="conv-items">
+            <!-- example static items; real list may be populated by JS -->
+            <div class="conv-item">
+              <div style="width:44px;height:44px;border-radius:8px;background:#eef4ff;display:flex;align-items:center;justify-content:center;font-weight:600">MS</div>
+              <div>
+                <div style="font-weight:600">MSME One Assistant</div>
+                <div class="small-muted" style="font-size:12px">System assistant</div>
+              </div>
+            </div>
+          </div>
+        </div>
 
-          <div class="chat-controls">
-            <input
-              id="input"
-              class="chat-input"
-              placeholder="Type a message..."
-            />
-            <!-- <button id="send" type="button" class="btn" title="Send">Send</button> -->
+        <!-- main chat panel -->
+        <div class="chat-panel">
+          <div class="chat-card">
+            <div class="chat-header">
+              <div>
+                <h3 style="margin:0">MSME One Assistant</h3>
+                <small class="small-muted">Ask anything about MSME One</small>
+              </div>
+              <div class="quick-actions">
+                <button id="btn-hi" type="button" class="icon-btn" title="Send Hi">Hi</button>
+                <button id="btn-hello" type="button" class="icon-btn" title="Send Hello">Hello</button>
+              </div>
+            </div>
 
-            <!-- Send icon uses static image -->
-            <button
-              id="send"
-              type="button"
-              class="icon-btn"
-              title="Send"
-              aria-label="send"
-            >
-              <img
-                src="{{ url_for('static', filename='images/send.svg') }}"
-                alt="send icon"
-              />
-            </button>
+            <div id="messages" class="messages" aria-live="polite">
+              <!-- messages appended here by JS; keep same id for compatibility -->
+            </div>
 
-            <!-- Mic button for audio send: use image from static/images -->
-            <button
-              id="mic-btn"
-              type="button"
-              class="icon-btn"
-              title="Record audio"
-              aria-pressed="false"
-              aria-label="record"
-            >
-              <img
-                src="{{ url_for('static', filename='images/mic.svg') }}"
-                alt="mic icon"
-              />
-            </button>
+            <div class="input-area">
+              <button id="lang-toggle" type="button" class="icon-btn" title="Toggle language" aria-label="toggle-language">EN</button>
+              <input id="input" class="chat-input" placeholder="Type a message..." />
 
-            <!-- language toggle button -->
-            <button
-              id="lang-toggle"
-              type="button"
-              class="small-btn"
-              title="Toggle language"
-              aria-label="toggle-language"
-            >
-              EN
-            </button>
+              <div style="display:flex;align-items:center;gap:6px">
+                <div id="rec-status" style="min-width:18px;text-align:center"></div>
+                <button id="mic-btn" type="button" class="icon-btn" title="Record audio" aria-pressed="false" aria-label="record">
+                  <img src="{{ url_for('static', filename='images/mic.svg') }}" alt="mic icon" />
+                </button>
 
-            <div
-              id="rec-status"
-              style="display: inline-block; margin-left: 6px"
-            ></div>
-
-            <button id="btn-hi" type="button" class="small-btn">
-              Send "Hi"
-            </button>
-            <button id="btn-hello" type="button" class="small-btn">
-              Send "Hello"
-            </button>
+                <button id="send" type="button" class="icon-btn" title="Send" aria-label="send">
+                  <img src="{{ url_for('static', filename='images/send.svg') }}" alt="send icon" />
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
